@@ -144,42 +144,33 @@ app.get('/', (req, res) => {
 
             <div class="grid">
                 <section>
-                    <h2>Clients & Leads</h2>
-                    <div class="route"><span class="method GET">GET</span> <span class="path">/api/clients</span></div>
-                    <div class="route"><span class="method POST">POST</span> <span class="path">/api/clients</span></div>
-                    <div class="route"><span class="method GET">GET</span> <span class="path">/api/leads</span></div>
-                    <div class="route"><span class="method PUT">PUT</span> <span class="path">/api/leads/:id</span></div>
+                    <h2>Dynamic Collections</h2>
+                    <div class="route"><span class="method GET">GET</span> <span class="path">/api/:collection</span></div>
+                    <div class="route"><span class="method POST">POST</span> <span class="path">/api/:collection</span></div>
+                    <div class="route"><span class="method GET">GET</span> <span class="path">/api/:collection/:id</span></div>
+                    <div class="route"><span class="method PUT">PUT</span> <span class="path">/api/:collection/:id</span></div>
+                    <div class="route"><span class="method DELETE">DELETE</span> <span class="path">/api/:collection/:id</span></div>
                 </section>
 
                 <section>
-                    <h2>Tasks (Advanced)</h2>
-                    <div class="route"><span class="method GET">GET</span> <span class="path">/api/tasks</span></div>
+                    <h2>Specialized Logic</h2>
+                    <div class="route"><span class="method GET">GET</span> <span class="path">/api/stats</span></div>
+                    <div class="route"><span class="method GET">GET</span> <span class="path">/api/settings/discord</span></div>
                     <div class="route"><span class="method POST">POST</span> <span class="path">/api/tasks/bulk-delete</span></div>
                     <div class="route"><span class="method PUT">PUT</span> <span class="path">/api/tasks/bulk-update</span></div>
-                    <div class="route"><span class="method PUT">PUT</span> <span class="path">/api/tasks/:id</span></div>
                 </section>
 
                 <section>
-                    <h2>Finance & Lifecycle</h2>
-                    <div class="route"><span class="method GET">GET</span> <span class="path">/api/proposals</span></div>
-                    <div class="route"><span class="method POST">POST</span> <span class="path">/api/proposals</span></div>
-                    <div class="route"><span class="method GET">GET</span> <span class="path">/api/quotes</span></div>
-                    <div class="route"><span class="method GET">GET</span> <span class="path">/api/stats</span></div>
+                    <h2>Query Filters</h2>
+                    <div class="route"><span class="path">/api/contacts?clientId=...</span></div>
+                    <div class="route"><span class="path">/api/comments?entityId=...</span></div>
+                    <div class="route"><span class="path">/api/activities?limit=100</span></div>
                 </section>
 
                 <section>
-                    <h2>Marketing & Growth</h2>
-                    <div class="route"><span class="method GET">GET</span> <span class="path">/api/campaigns</span></div>
-                    <div class="route"><span class="method POST">POST</span> <span class="path">/api/campaigns</span></div>
-                    <div class="route"><span class="method GET">GET</span> <span class="path">/api/activities</span></div>
-                </section>
-
-                <section>
-                    <h2>Team & Engagement</h2>
-                    <div class="route"><span class="method GET">GET</span> <span class="path">/api/team</span></div>
-                    <div class="route"><span class="method POST">POST</span> <span class="path">/api/team</span></div>
-                    <div class="route"><span class="method GET">GET</span> <span class="path">/api/notifications</span></div>
-                    <div class="route"><span class="method POST">POST</span> <span class="path">/api/comments</span></div>
+                    <h2>System Status</h2>
+                    <div class="route"><span class="method GET">GET</span> <span class="path">/api/health</span></div>
+                    <div class="route"><span class="method POST">POST</span> <span class="path">/api/discord/test</span></div>
                 </section>
             </div>
 
@@ -203,184 +194,99 @@ app.get('/', (req, res) => {
 // Health
 app.get('/api/health', (req, res) => res.json({ status: 'ok', service: 'ChromaBase API', firestore: !!db }));
 
-// ==================== CLIENTS ====================
-app.get('/api/clients', async (req, res) => {
+// ==================== DYNAMIC COLLECTION HANDLERS ====================
+
+// GET List
+app.get('/api/:collection', async (req, res) => {
   try {
-    const snap = await db.collection('clients').orderBy('createdAt', 'desc').get();
-    res.json(success(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
-  } catch (e) { res.json(error(e.message)); }
-});
+    const { collection } = req.params;
+    let query = db.collection(collection);
 
-app.post('/api/clients', async (req, res) => {
-  try {
-    const data = { ...req.body, createdAt: Date.now(), updatedAt: Date.now() };
-    const doc = await db.collection('clients').add(data);
-    res.json(success({ id: doc.id }));
-  } catch (e) { res.json(error(e.message)); }
-});
-
-app.get('/api/clients/:id', async (req, res) => {
-  try {
-    const doc = await db.collection('clients').doc(req.params.id).get();
-    doc.exists ? res.json(success({ id: doc.id, ...doc.data() })) : res.json(error('Not found'));
-  } catch (e) { res.json(error(e.message)); }
-});
-
-app.put('/api/clients/:id', async (req, res) => {
-  try {
-    await db.collection('clients').doc(req.params.id).update({ ...req.body, updatedAt: Date.now() });
-    res.json(success({ id: req.params.id }));
-  } catch (e) { res.json(error(e.message)); }
-});
-
-app.delete('/api/clients/:id', async (req, res) => {
-  try {
-    await db.collection('clients').doc(req.params.id).delete();
-    res.json(success({ deleted: true }));
-  } catch (e) { res.json(error(e.message)); }
-});
-
-// ==================== LEADS ====================
-app.get('/api/leads', async (req, res) => {
-  try {
-    const snap = await db.collection('leads').orderBy('createdAt', 'desc').get();
-    res.json(success(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
-  } catch (e) { res.json(error(e.message)); }
-});
-
-app.post('/api/leads', async (req, res) => {
-  try {
-    const data = { ...req.body, createdAt: Date.now(), updatedAt: Date.now() };
-    const doc = await db.collection('leads').add(data);
-    res.json(success({ id: doc.id }));
-  } catch (e) { res.json(error(e.message)); }
-});
-
-app.get('/api/leads/:id', async (req, res) => {
-  try {
-    const doc = await db.collection('leads').doc(req.params.id).get();
-    doc.exists ? res.json(success({ id: doc.id, ...doc.data() })) : res.json(error('Not found'));
-  } catch (e) { res.json(error(e.message)); }
-});
-
-app.put('/api/leads/:id', async (req, res) => {
-  try {
-    await db.collection('leads').doc(req.params.id).update({ ...req.body, updatedAt: Date.now() });
-    res.json(success({ id: req.params.id }));
-  } catch (e) { res.json(error(e.message)); }
-});
-
-app.delete('/api/leads/:id', async (req, res) => {
-  try {
-    await db.collection('leads').doc(req.params.id).delete();
-    res.json(success({ deleted: true }));
-  } catch (e) { res.json(error(e.message)); }
-});
-
-// ==================== TASKS ====================
-app.get('/api/tasks', async (req, res) => {
-  try {
-    const snap = await db.collection('tasks').orderBy('dueDate', 'asc').get();
-    res.json(success(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
-  } catch (e) { res.json(error(e.message)); }
-});
-
-// Bulk operations must be defined before /:id routes
-app.post('/api/tasks/bulk-delete', async (req, res) => {
-  try {
-    const { ids } = req.body;
-    if (!Array.isArray(ids)) return res.json(error('ids must be an array'));
-    if (ids.length === 0) return res.json(success({ deletedCount: 0 }));
-
-    const batch = db.batch();
-    ids.forEach(id => {
-      batch.delete(db.collection('tasks').doc(id));
-    });
-    await batch.commit();
-    res.json(success({ deletedCount: ids.length }));
-  } catch (e) { res.json(error(e.message)); }
-});
-
-app.put('/api/tasks/bulk-update', async (req, res) => {
-  try {
-    const { ids, data } = req.body;
-    if (!Array.isArray(ids)) return res.json(error('ids must be an array'));
-    if (ids.length === 0) return res.json(success({ updatedCount: 0 }));
-
-    const batch = db.batch();
-    const updateData = { ...data, updatedAt: Date.now() };
-
-    // Fetch docs in parallel to check for recurrence
-    const docs = await Promise.all(ids.map(id => db.collection('tasks').doc(id).get()));
-
-    ids.forEach((id, index) => {
-      const doc = docs[index];
-      batch.update(db.collection('tasks').doc(id), updateData);
-
-      if (doc.exists) {
-        const existingData = doc.data();
-        const isNowCompleted = existingData.status !== 'completed' && data.status === 'completed';
-
-        if (isNowCompleted && existingData.recurrenceRule && existingData.recurrenceRule !== 'none') {
-          let addedDays = 1;
-          if (existingData.recurrenceRule === 'daily') addedDays = 1;
-          else if (existingData.recurrenceRule === 'weekly') addedDays = 7;
-          else if (existingData.recurrenceRule === 'monthly') addedDays = 30;
-
-          const nextDueDate = new Date(existingData.dueDate || Date.now());
-          nextDueDate.setDate(nextDueDate.getDate() + addedDays);
-
-          const nextTaskRef = db.collection('tasks').doc();
-          batch.set(nextTaskRef, {
-            ...existingData,
-            status: 'todo',
-            dueDate: nextDueDate.getTime(),
-            createdAt: Date.now(),
-            updatedAt: Date.now()
-          });
-        }
+    // Dynamic Sorters
+    if (collection === 'tasks') {
+      query = query.orderBy('dueDate', 'asc');
+    } else if (collection === 'appointments') {
+      query = query.orderBy('startTime', 'asc');
+    } else if (collection === 'activities') {
+      query = query.orderBy('timestamp', 'desc').limit(100);
+    } else if (collection === 'comments') {
+      query = query.orderBy('createdAt', 'asc');
+    } else {
+      // Default sorter
+      try {
+        query = query.orderBy('createdAt', 'desc');
+      } catch (e) {
+        // Fallback if createdAt doesn't exist
       }
-    });
+    }
 
-    await batch.commit();
-    res.json(success({ updatedCount: ids.length }));
+    const snap = await query.get();
+    let docs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+
+    // Dynamic Filters
+    if (collection === 'contacts' && req.query.clientId) {
+      docs = docs.filter(c => c.clientId === req.query.clientId);
+    }
+    if (collection === 'comments' && req.query.entityId) {
+      docs = docs.filter(c => c.entityId === req.query.entityId);
+    }
+
+    res.json(success(docs));
   } catch (e) { res.json(error(e.message)); }
 });
 
-app.post('/api/tasks', async (req, res) => {
+// GET Single
+app.get('/api/:collection/:id', async (req, res) => {
   try {
-    const data = { ...req.body, createdAt: Date.now(), updatedAt: Date.now() };
-    const doc = await db.collection('tasks').add(data);
-    sendDiscordAlertIfEnabled('task', { id: doc.id, ...data });
-    res.json(success({ id: doc.id }));
-  } catch (e) { res.json(error(e.message)); }
-});
-
-app.get('/api/tasks/:id', async (req, res) => {
-  try {
-    const doc = await db.collection('tasks').doc(req.params.id).get();
+    const { collection, id } = req.params;
+    const doc = await db.collection(collection).doc(id).get();
     doc.exists ? res.json(success({ id: doc.id, ...doc.data() })) : res.json(error('Not found'));
   } catch (e) { res.json(error(e.message)); }
 });
 
-app.put('/api/tasks/:id', async (req, res) => {
+// POST Create
+app.post('/api/:collection', async (req, res) => {
   try {
-    const taskId = req.params.id;
-    const existingDoc = await db.collection('tasks').doc(taskId).get();
+    const { collection } = req.params;
+    const data = { ...req.body, createdAt: Date.now(), updatedAt: Date.now() };
+
+    if (collection === 'activities') {
+      data.timestamp = Date.now();
+    }
+    if (collection === 'notifications') {
+      data.read = false;
+    }
+
+    const doc = await db.collection(collection).add(data);
+
+    // Alerts
+    if (collection === 'tasks' || collection === 'deals') {
+      sendDiscordAlertIfEnabled(collection === 'tasks' ? 'task' : 'deal', { id: doc.id, ...data });
+    }
+
+    res.json(success({ id: doc.id }));
+  } catch (e) { res.json(error(e.message)); }
+});
+
+// PUT Update
+app.put('/api/:collection/:id', async (req, res) => {
+  try {
+    const { collection, id } = req.params;
+    const existingDoc = await db.collection(collection).doc(id).get();
 
     if (!existingDoc.exists) return res.json(error('Not found'));
 
     const existingData = existingDoc.data();
-    const isNowCompleted = existingData.status !== 'completed' && req.body.status === 'completed';
+    const isNowCompleted = collection === 'tasks' && existingData.status !== 'completed' && req.body.status === 'completed';
 
-    await db.collection('tasks').doc(taskId).update({ ...req.body, updatedAt: Date.now() });
+    await db.collection(collection).doc(id).update({ ...req.body, updatedAt: Date.now() });
 
-    // Recurrence Logic
+    // Recurrence Logic for Tasks
     if (isNowCompleted && existingData.recurrenceRule && existingData.recurrenceRule !== 'none') {
       let addedDays = 1;
       if (existingData.recurrenceRule === 'daily') addedDays = 1;
       else if (existingData.recurrenceRule === 'weekly') addedDays = 7;
-      else if (existingData.recurrenceRule === 'monthly') addedDays = 30; // simple approximation
+      else if (existingData.recurrenceRule === 'monthly') addedDays = 30;
 
       const nextDueDate = new Date(existingData.dueDate || Date.now());
       nextDueDate.setDate(nextDueDate.getDate() + addedDays);
@@ -393,288 +299,75 @@ app.put('/api/tasks/:id', async (req, res) => {
         updatedAt: Date.now()
       };
       delete nextTask.id;
-
       await db.collection('tasks').add(nextTask);
-      sendDiscordAlertIfEnabled('task', nextTask);
     }
 
-    sendDiscordAlertIfEnabled('task', { id: taskId, ...existingData, ...req.body });
-    res.json(success({ id: taskId }));
-  } catch (e) { res.json(error(e.message)); }
-});
-
-app.delete('/api/tasks/:id', async (req, res) => {
-  try {
-    await db.collection('tasks').doc(req.params.id).delete();
-    res.json(success({ deleted: true }));
-  } catch (e) { res.json(error(e.message)); }
-});
-
-// ==================== APPOINTMENTS ====================
-app.get('/api/appointments', async (req, res) => {
-  try {
-    const snap = await db.collection('appointments').orderBy('startTime', 'asc').get();
-    res.json(success(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
-  } catch (e) { res.json(error(e.message)); }
-});
-
-app.post('/api/appointments', async (req, res) => {
-  try {
-    const data = { ...req.body, createdAt: Date.now(), updatedAt: Date.now() };
-    const doc = await db.collection('appointments').add(data);
-    res.json(success({ id: doc.id }));
-  } catch (e) { res.json(error(e.message)); }
-});
-
-app.get('/api/appointments/:id', async (req, res) => {
-  try {
-    const doc = await db.collection('appointments').doc(req.params.id).get();
-    doc.exists ? res.json(success({ id: doc.id, ...doc.data() })) : res.json(error('Not found'));
-  } catch (e) { res.json(error(e.message)); }
-});
-
-app.put('/api/appointments/:id', async (req, res) => {
-  try {
-    await db.collection('appointments').doc(req.params.id).update({ ...req.body, updatedAt: Date.now() });
-    res.json(success({ id: req.params.id }));
-  } catch (e) { res.json(error(e.message)); }
-});
-
-app.delete('/api/appointments/:id', async (req, res) => {
-  try {
-    await db.collection('appointments').doc(req.params.id).delete();
-    res.json(success({ deleted: true }));
-  } catch (e) { res.json(error(e.message)); }
-});
-
-// ==================== QUOTES ====================
-app.get('/api/quotes', async (req, res) => {
-  try {
-    const snap = await db.collection('quotes').orderBy('createdAt', 'desc').get();
-    res.json(success(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
-  } catch (e) { res.json(error(e.message)); }
-});
-
-app.post('/api/quotes', async (req, res) => {
-  try {
-    const data = { ...req.body, createdAt: Date.now(), updatedAt: Date.now() };
-    const doc = await db.collection('quotes').add(data);
-    res.json(success({ id: doc.id }));
-  } catch (e) { res.json(error(e.message)); }
-});
-
-app.get('/api/quotes/:id', async (req, res) => {
-  try {
-    const doc = await db.collection('quotes').doc(req.params.id).get();
-    doc.exists ? res.json(success({ id: doc.id, ...doc.data() })) : res.json(error('Not found'));
-  } catch (e) { res.json(error(e.message)); }
-});
-
-app.put('/api/quotes/:id', async (req, res) => {
-  try {
-    await db.collection('quotes').doc(req.params.id).update({ ...req.body, updatedAt: Date.now() });
-    res.json(success({ id: req.params.id }));
-  } catch (e) { res.json(error(e.message)); }
-});
-
-app.delete('/api/quotes/:id', async (req, res) => {
-  try {
-    await db.collection('quotes').doc(req.params.id).delete();
-    res.json(success({ deleted: true }));
-  } catch (e) { res.json(error(e.message)); }
-});
-
-// ==================== ACTIVITIES ====================
-app.get('/api/activities', async (req, res) => {
-  try {
-    const snap = await db.collection('activities').orderBy('timestamp', 'desc').limit(100).get();
-    res.json(success(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
-  } catch (e) { res.json(error(e.message)); }
-});
-
-app.post('/api/activities', async (req, res) => {
-  try {
-    const data = { ...req.body, timestamp: Date.now(), createdAt: Date.now() };
-    const doc = await db.collection('activities').add(data);
-    res.json(success({ id: doc.id }));
-  } catch (e) { res.json(error(e.message)); }
-});
-
-app.delete('/api/activities/:id', async (req, res) => {
-  try {
-    await db.collection('activities').doc(req.params.id).delete();
-    res.json(success({ deleted: true }));
-  } catch (e) { res.json(error(e.message)); }
-});
-
-// ==================== CAMPAIGNS ====================
-app.get('/api/campaigns', async (req, res) => {
-  try {
-    const snap = await db.collection('campaigns').orderBy('createdAt', 'desc').get();
-    res.json(success(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
-  } catch (e) { res.json(error(e.message)); }
-});
-
-app.post('/api/campaigns', async (req, res) => {
-  try {
-    const data = { ...req.body, createdAt: Date.now(), updatedAt: Date.now() };
-    const doc = await db.collection('campaigns').add(data);
-    res.json(success({ id: doc.id }));
-  } catch (e) { res.json(error(e.message)); }
-});
-
-app.get('/api/campaigns/:id', async (req, res) => {
-  try {
-    const doc = await db.collection('campaigns').doc(req.params.id).get();
-    doc.exists ? res.json(success({ id: doc.id, ...doc.data() })) : res.json(error('Not found'));
-  } catch (e) { res.json(error(e.message)); }
-});
-
-app.put('/api/campaigns/:id', async (req, res) => {
-  try {
-    await db.collection('campaigns').doc(req.params.id).update({ ...req.body, updatedAt: Date.now() });
-    res.json(success({ id: req.params.id }));
-  } catch (e) { res.json(error(e.message)); }
-});
-
-app.delete('/api/campaigns/:id', async (req, res) => {
-  try {
-    await db.collection('campaigns').doc(req.params.id).delete();
-    res.json(success({ deleted: true }));
-  } catch (e) { res.json(error(e.message)); }
-});
-
-// ==================== CONTACTS ====================
-app.get('/api/contacts', async (req, res) => {
-  try {
-    const snap = await db.collection('contacts').orderBy('createdAt', 'desc').get();
-    let contacts = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-    if (req.query.clientId) {
-      contacts = contacts.filter(c => c.clientId === req.query.clientId);
+    // Alerts for Deals/Tasks
+    if (collection === 'tasks' || collection === 'deals') {
+      sendDiscordAlertIfEnabled(collection === 'tasks' ? 'task' : 'deal', { id, ...existingData, ...req.body });
     }
-    res.json(success(contacts));
+
+    res.json(success({ id }));
   } catch (e) { res.json(error(e.message)); }
 });
 
-app.post('/api/contacts', async (req, res) => {
+// DELETE
+app.delete('/api/:collection/:id', async (req, res) => {
   try {
-    const data = { ...req.body, createdAt: Date.now(), updatedAt: Date.now() };
-    const doc = await db.collection('contacts').add(data);
-    res.json(success({ id: doc.id }));
-  } catch (e) { res.json(error(e.message)); }
-});
-
-app.get('/api/contacts/:id', async (req, res) => {
-  try {
-    const doc = await db.collection('contacts').doc(req.params.id).get();
-    doc.exists ? res.json(success({ id: doc.id, ...doc.data() })) : res.json(error('Not found'));
-  } catch (e) { res.json(error(e.message)); }
-});
-
-app.put('/api/contacts/:id', async (req, res) => {
-  try {
-    await db.collection('contacts').doc(req.params.id).update({ ...req.body, updatedAt: Date.now() });
-    res.json(success({ id: req.params.id }));
-  } catch (e) { res.json(error(e.message)); }
-});
-
-app.delete('/api/contacts/:id', async (req, res) => {
-  try {
-    await db.collection('contacts').doc(req.params.id).delete();
+    const { collection, id } = req.params;
+    await db.collection(collection).doc(id).delete();
     res.json(success({ deleted: true }));
   } catch (e) { res.json(error(e.message)); }
 });
 
-// ==================== DEALS ====================
-app.get('/api/deals', async (req, res) => {
+// ==================== BULK OPERATIONS ====================
+app.post('/api/tasks/bulk-delete', async (req, res) => {
   try {
-    const snap = await db.collection('deals').orderBy('createdAt', 'desc').get();
-    res.json(success(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
+    const { ids } = req.body;
+    if (!Array.isArray(ids)) return res.json(error('ids must be an array'));
+    const batch = db.batch();
+    ids.forEach(id => { batch.delete(db.collection('tasks').doc(id)); });
+    await batch.commit();
+    res.json(success({ deletedCount: ids.length }));
   } catch (e) { res.json(error(e.message)); }
 });
 
-app.post('/api/deals', async (req, res) => {
+app.put('/api/tasks/bulk-update', async (req, res) => {
   try {
-    const data = { ...req.body, createdAt: Date.now(), updatedAt: Date.now() };
-    const doc = await db.collection('deals').add(data);
-    sendDiscordAlertIfEnabled('deal', { id: doc.id, ...data });
-    res.json(success({ id: doc.id }));
+    const { ids, data } = req.body;
+    if (!Array.isArray(ids)) return res.json(error('ids must be an array'));
+    const batch = db.batch();
+    ids.forEach(id => { batch.update(db.collection('tasks').doc(id), { ...data, updatedAt: Date.now() }); });
+    await batch.commit();
+    res.json(success({ updatedCount: ids.length }));
   } catch (e) { res.json(error(e.message)); }
 });
 
-app.get('/api/deals/:id', async (req, res) => {
+// ==================== SPECIALIZED HANDLERS ====================
+
+app.get('/api/stats', async (req, res) => {
   try {
-    const doc = await db.collection('deals').doc(req.params.id).get();
-    doc.exists ? res.json(success({ id: doc.id, ...doc.data() })) : res.json(error('Not found'));
+    const [clients, leads, tasks, quotes] = await Promise.all([
+      db.collection('clients').get(),
+      db.collection('leads').get(),
+      db.collection('tasks').get(),
+      db.collection('quotes').get()
+    ]);
+    res.json(success({
+      totalClients: clients.size,
+      activeLeads: leads.docs.filter(d => !['won', 'lost'].includes(d.data().status)).length,
+      wonLeads: leads.docs.filter(d => d.data().status === 'won').length,
+      pendingTasks: tasks.docs.filter(d => d.data().status !== 'completed').length,
+      totalRevenue: quotes.docs.filter(d => d.data().status === 'accepted').reduce((sum, d) => sum + (d.data().total || 0), 0),
+      pendingQuotes: quotes.docs.filter(d => d.data().status === 'sent').length
+    }));
   } catch (e) { res.json(error(e.message)); }
 });
 
-app.put('/api/deals/:id', async (req, res) => {
-  try {
-    const doc = await db.collection('deals').doc(req.params.id).get();
-    if (doc.exists) {
-      const existingData = doc.data();
-      if (req.body.stage && existingData.stage !== req.body.stage) {
-        sendDiscordAlertIfEnabled('deal', { id: req.params.id, ...existingData, ...req.body });
-      }
-    }
-    await db.collection('deals').doc(req.params.id).update({ ...req.body, updatedAt: Date.now() });
-    res.json(success({ id: req.params.id }));
-  } catch (e) { res.json(error(e.message)); }
-});
-
-app.delete('/api/deals/:id', async (req, res) => {
-  try {
-    await db.collection('deals').doc(req.params.id).delete();
-    res.json(success({ deleted: true }));
-  } catch (e) { res.json(error(e.message)); }
-});
-
-// ==================== PROPOSALS ====================
-app.get('/api/proposals', async (req, res) => {
-  try {
-    const snap = await db.collection('proposals').orderBy('createdAt', 'desc').get();
-    res.json(success(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
-  } catch (e) { res.json(error(e.message)); }
-});
-
-app.post('/api/proposals', async (req, res) => {
-  try {
-    const data = { ...req.body, createdAt: Date.now(), updatedAt: Date.now() };
-    const doc = await db.collection('proposals').add(data);
-    res.json(success({ id: doc.id }));
-  } catch (e) { res.json(error(e.message)); }
-});
-
-app.get('/api/proposals/:id', async (req, res) => {
-  try {
-    const doc = await db.collection('proposals').doc(req.params.id).get();
-    doc.exists ? res.json(success({ id: doc.id, ...doc.data() })) : res.json(error('Not found'));
-  } catch (e) { res.json(error(e.message)); }
-});
-
-app.put('/api/proposals/:id', async (req, res) => {
-  try {
-    await db.collection('proposals').doc(req.params.id).update({ ...req.body, updatedAt: Date.now() });
-    res.json(success({ id: req.params.id }));
-  } catch (e) { res.json(error(e.message)); }
-});
-
-app.delete('/api/proposals/:id', async (req, res) => {
-  try {
-    await db.collection('proposals').doc(req.params.id).delete();
-    res.json(success({ deleted: true }));
-  } catch (e) { res.json(error(e.message)); }
-});
-
-// ==================== DISCORD SETTINGS ====================
 app.get('/api/settings/discord', async (req, res) => {
   try {
     const doc = await db.collection('settings').doc('discord').get();
-    if (!doc.exists) {
-      return res.json(success({ webhookUrl: '', options: { highPriorityTasks: false, dealStageChanges: false } }));
-    }
-    res.json(success(doc.data()));
+    res.json(success(doc.exists ? doc.data() : { webhookUrl: '', options: { highPriorityTasks: false, dealStageChanges: false } }));
   } catch (e) { res.json(error(e.message)); }
 });
 
@@ -690,92 +383,22 @@ const sendDiscordAlertIfEnabled = async (type, data) => {
     const doc = await db.collection('settings').doc('discord').get();
     if (!doc.exists) return;
     const settings = doc.data();
-    if (!settings.webhookUrl || !settings.webhookUrl.trim()) return;
+    if (!settings.webhookUrl) return;
 
     let embeds = [];
-
-    if (type === 'task' && settings.options?.highPriorityTasks) {
-      if (['high', 'urgent'].includes(data.priority?.toLowerCase()) && data.status !== 'completed') {
-        embeds.push({
-          title: `🔴 High Priority Task: ${data.title}`,
-          color: 16711680,
-          description: `Status: ${data.status}\nDue: ${data.dueDate ? new Date(data.dueDate).toLocaleString() : 'N/A'}`
-        });
-      } else return;
+    if (type === 'task' && settings.options?.highPriorityTasks && ['high', 'urgent'].includes(data.priority?.toLowerCase()) && data.status !== 'completed') {
+      embeds.push({ title: `🔴 High Priority Task: ${data.title}`, color: 16711680, description: `Status: ${data.status}\nDue: ${data.dueDate ? new Date(data.dueDate).toLocaleString() : 'N/A'}` });
     } else if (type === 'deal' && settings.options?.dealStageChanges) {
-      embeds.push({
-        title: `🤝 Deal Stage Updated: ${data.name || 'Unknown Deal'}`,
-        color: 3447003,
-        description: `New Stage: **${data.stage}**\nValue: $${data.value || 0}`
-      });
-    } else return;
+      embeds.push({ title: `🤝 Deal Stage Updated: ${data.name || 'Unknown'}`, color: 3447003, description: `New Stage: **${data.stage}**\nValue: $${data.value || 0}` });
+    }
 
     if (embeds.length > 0) {
-      fetch(settings.webhookUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ content: '', embeds })
-      }).catch(e => console.error('Discord fetch failed:', e.message));
+      // Use built-in fetch if possible, or axios/node-fetch if present. 
+      // server.js was using fetch at the bottom.
+      fetch(settings.webhookUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ embeds }) }).catch(e => { });
     }
-  } catch (e) { console.error('Discord alert error:', e.message); }
+  } catch (e) { }
 };
-
-// ==================== NOTIFICATIONS ====================
-app.get('/api/notifications', async (req, res) => {
-  try {
-    const snap = await db.collection('notifications').orderBy('createdAt', 'desc').get();
-    res.json(success(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
-  } catch (e) { res.json(error(e.message)); }
-});
-
-app.post('/api/notifications', async (req, res) => {
-  try {
-    const data = { ...req.body, createdAt: Date.now(), read: false };
-    const doc = await db.collection('notifications').add(data);
-    res.json(success({ id: doc.id }));
-  } catch (e) { res.json(error(e.message)); }
-});
-
-app.put('/api/notifications/:id', async (req, res) => {
-  try {
-    await db.collection('notifications').doc(req.params.id).update({ ...req.body, updatedAt: Date.now() });
-    res.json(success({ id: req.params.id }));
-  } catch (e) { res.json(error(e.message)); }
-});
-
-app.delete('/api/notifications/:id', async (req, res) => {
-  try {
-    await db.collection('notifications').doc(req.params.id).delete();
-    res.json(success({ deleted: true }));
-  } catch (e) { res.json(error(e.message)); }
-});
-
-// ==================== COMMENTS ====================
-app.get('/api/comments', async (req, res) => {
-  try {
-    const snap = await db.collection('comments').orderBy('createdAt', 'asc').get();
-    let comments = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-    if (req.query.entityId) {
-      comments = comments.filter(c => c.entityId === req.query.entityId);
-    }
-    res.json(success(comments));
-  } catch (e) { res.json(error(e.message)); }
-});
-
-app.post('/api/comments', async (req, res) => {
-  try {
-    const data = { ...req.body, createdAt: Date.now() };
-    const doc = await db.collection('comments').add(data);
-    res.json(success({ id: doc.id }));
-  } catch (e) { res.json(error(e.message)); }
-});
-
-app.delete('/api/comments/:id', async (req, res) => {
-  try {
-    await db.collection('comments').doc(req.params.id).delete();
-    res.json(success({ deleted: true }));
-  } catch (e) { res.json(error(e.message)); }
-});
 
 // ==================== DISCORD INTEGRATION ====================
 app.post('/api/discord/test', async (req, res) => {
@@ -789,7 +412,7 @@ app.post('/api/discord/test', async (req, res) => {
       embeds: [{
         title: "✅ ChromaBase Integration Successful",
         description: "Your Discord server is now connected to ChromaBase. You will receive automated task reminders and deal alerts here.",
-        color: 5814783, // #5865F2 in decimal
+        color: 5814783,
         timestamp: new Date().toISOString()
       }]
     };
@@ -805,64 +428,6 @@ app.post('/api/discord/test', async (req, res) => {
     } else {
       res.json(error(`Discord API Error: ${response.statusText}`));
     }
-  } catch (e) { res.json(error(e.message)); }
-});
-
-// ==================== DASHBOARD STATS ====================
-app.get('/api/stats', async (req, res) => {
-  try {
-    const [clients, leads, tasks, quotes] = await Promise.all([
-      db.collection('clients').get(),
-      db.collection('leads').get(),
-      db.collection('tasks').get(),
-      db.collection('quotes').get()
-    ]);
-
-    const activeLeads = leads.docs.filter(d => d.data().status !== 'won' && d.data().status !== 'lost').length;
-    const wonLeads = leads.docs.filter(d => d.data().status === 'won').length;
-    const pendingTasks = tasks.docs.filter(d => d.data().status !== 'completed').length;
-    const totalRevenue = quotes.docs
-      .filter(d => d.data().status === 'accepted')
-      .reduce((sum, d) => sum + (d.data().total || 0), 0);
-
-    res.json(success({
-      totalClients: clients.size,
-      activeLeads,
-      wonLeads,
-      pendingTasks,
-      totalRevenue,
-      pendingQuotes: quotes.docs.filter(d => d.data().status === 'sent').length
-    }));
-  } catch (e) { res.json(error(e.message)); }
-});
-
-// ==================== TEAM ====================
-app.get('/api/team', async (req, res) => {
-  try {
-    const snap = await db.collection('team').orderBy('name', 'asc').get();
-    res.json(success(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
-  } catch (e) { res.json(error(e.message)); }
-});
-
-app.post('/api/team', async (req, res) => {
-  try {
-    const data = { ...req.body, createdAt: Date.now(), updatedAt: Date.now() };
-    const doc = await db.collection('team').add(data);
-    res.json(success({ id: doc.id }));
-  } catch (e) { res.json(error(e.message)); }
-});
-
-app.put('/api/team/:id', async (req, res) => {
-  try {
-    await db.collection('team').doc(req.params.id).update({ ...req.body, updatedAt: Date.now() });
-    res.json(success({ id: req.params.id }));
-  } catch (e) { res.json(error(e.message)); }
-});
-
-app.delete('/api/team/:id', async (req, res) => {
-  try {
-    await db.collection('team').doc(req.params.id).delete();
-    res.json(success({ deleted: true }));
   } catch (e) { res.json(error(e.message)); }
 });
 
