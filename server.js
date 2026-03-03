@@ -165,6 +165,9 @@ app.get('/', (req, res) => {
                     <div class="route"><span class="path">/api/contacts?clientId=...</span></div>
                     <div class="route"><span class="path">/api/comments?entityId=...</span></div>
                     <div class="route"><span class="path">/api/activities?limit=100</span></div>
+                    <div class="route" style="margin-top: 12px; border-top: 1px dotted var(--border); padding-top: 12px;">
+                        <span class="method GET">GET</span> <span class="path">/api/accounts/:id/timeline</span>
+                    </div>
                 </section>
 
                 <section>
@@ -264,6 +267,20 @@ app.post('/api/:collection', async (req, res) => {
       sendDiscordAlertIfEnabled(collection === 'tasks' ? 'task' : 'deal', { id: doc.id, ...data });
     }
 
+    // NEW: Auto-create calendar event when a Task with a dueDate is created
+    if (collection === 'tasks' && data.dueDate) {
+      await db.collection('calendar').add({
+        title: data.title || 'Task Deadline',
+        type: 'TASK',
+        status: data.status || 'todo',
+        timestamp: data.dueDate,
+        accountId: data.accountId || null,
+        taskId: doc.id,
+        createdAt: Date.now(),
+        updatedAt: Date.now()
+      });
+    }
+
     res.json(success({ id: doc.id }));
   } catch (e) { res.json(error(e.message)); }
 });
@@ -278,8 +295,46 @@ app.put('/api/:collection/:id', async (req, res) => {
 
     const existingData = existingDoc.data();
     const isNowCompleted = collection === 'tasks' && existingData.status !== 'completed' && req.body.status === 'completed';
+    const isCalendarNowCompleted = collection === 'calendar' && existingData.status !== 'completed' && req.body.status === 'completed';
 
     await db.collection(collection).doc(id).update({ ...req.body, updatedAt: Date.now() });
+
+    // Sync Calendar Event -> Task
+    if (collection === 'calendar' && req.body.timestamp && existingData.taskId) {
+      await db.collection('tasks').doc(existingData.taskId).update({
+        dueDate: req.body.timestamp,
+        updatedAt: Date.now()
+      });
+    }
+
+    // Sync Task -> Calendar Event
+    if (collection === 'tasks') {
+      const calSnap = await db.collection('calendar').where('taskId', '==', id).get();
+      if (!calSnap.empty) {
+        const calDocId = calSnap.docs[0].id;
+        let calUpdates = { updatedAt: Date.now() };
+        if (req.body.dueDate) calUpdates.timestamp = req.body.dueDate;
+        if (req.body.status) calUpdates.status = req.body.status;
+        if (req.body.title) calUpdates.title = req.body.title;
+        await db.collection('calendar').doc(calDocId).update(calUpdates);
+      }
+    }
+
+    // Auto-Follow-up Task for Meetings
+    if (isCalendarNowCompleted && existingData.type === 'MEETING') {
+      const followUpDate = new Date();
+      followUpDate.setDate(followUpDate.getDate() + 1); // +24 hours
+      await db.collection('tasks').add({
+        title: `Follow-up regarding: ${existingData.title || req.body.title || 'Meeting'}`,
+        description: 'Automated follow-up task generated post-meeting.',
+        status: 'todo',
+        priority: 'medium',
+        dueDate: followUpDate.getTime(),
+        accountId: existingData.accountId || req.body.accountId || null,
+        createdAt: Date.now(),
+        updatedAt: Date.now()
+      });
+    }
 
     // Recurrence Logic for Tasks
     if (isNowCompleted && existingData.recurrenceRule && existingData.recurrenceRule !== 'none') {
@@ -299,7 +354,20 @@ app.put('/api/:collection/:id', async (req, res) => {
         updatedAt: Date.now()
       };
       delete nextTask.id;
-      await db.collection('tasks').add(nextTask);
+
+      const newRecurrentDoc = await db.collection('tasks').add(nextTask);
+
+      // Add linked calendar event for the new recurring task
+      await db.collection('calendar').add({
+        title: nextTask.title || 'Task Deadline',
+        type: 'TASK',
+        status: 'todo',
+        timestamp: nextTask.dueDate,
+        accountId: nextTask.accountId || null,
+        taskId: newRecurrentDoc.id,
+        createdAt: Date.now(),
+        updatedAt: Date.now()
+      });
     }
 
     // Alerts for Deals/Tasks
@@ -344,6 +412,29 @@ app.put('/api/tasks/bulk-update', async (req, res) => {
 });
 
 // ==================== SPECIALIZED HANDLERS ====================
+
+app.get('/api/accounts/:id/timeline', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const [tasksSnap, calendarSnap, activitiesSnap] = await Promise.all([
+      db.collection('tasks').where('accountId', '==', id).get(),
+      db.collection('calendar').where('accountId', '==', id).get(),
+      db.collection('activities').where('accountId', '==', id).get()
+    ]);
+
+    const tasks = tasksSnap.docs.map(d => ({ id: d.id, _feedType: 'task', ...d.data() }));
+    const events = calendarSnap.docs.map(d => ({ id: d.id, _feedType: 'event', ...d.data() }));
+    const activities = activitiesSnap.docs.map(d => ({ id: d.id, _feedType: 'activity', ...d.data() }));
+
+    const feed = [...tasks, ...events, ...activities].sort((a, b) => {
+      const timeA = a.timestamp || a.dueDate || a.createdAt || 0;
+      const timeB = b.timestamp || b.dueDate || b.createdAt || 0;
+      return timeB - timeA; // Descending, newest first
+    });
+
+    res.json(success(feed));
+  } catch (e) { res.json(error(e.message)); }
+});
 
 app.get('/api/stats', async (req, res) => {
   try {
