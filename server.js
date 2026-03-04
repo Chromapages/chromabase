@@ -223,7 +223,14 @@ app.get('/api/:collection', async (req, res) => {
       }
     }
 
-    const snap = await query.get();
+    let snap;
+    try {
+      snap = await query.get();
+    } catch (queryError) {
+      console.warn(`[API] Query failed for ${collection} (possibly missing index/field on orderBy). Falling back to unordered query. Error:`, queryError.message);
+      snap = await db.collection(collection).get();
+    }
+
     let docs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
 
     // Dynamic Filters
@@ -235,7 +242,10 @@ app.get('/api/:collection', async (req, res) => {
     }
 
     res.json(success(docs));
-  } catch (e) { res.json(error(e.message)); }
+  } catch (e) {
+    console.error(`[API] Unhandled error in /api/${req.params.collection}:`, e);
+    res.json(error(e.message));
+  }
 });
 
 // GET Single
