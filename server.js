@@ -14,9 +14,6 @@ app.use(cors());
 app.use(express.json());
 
 const authenticate = async (req, res, next) => {
-  // DEV MODE: Skip auth
-  return next();
-
   if (req.path === '/' || req.path === '/api/health') return next();
 
   const authHeader = req.headers.authorization;
@@ -203,7 +200,8 @@ app.get('/api/health', (req, res) => res.json({ status: 'ok', service: 'ChromaBa
 app.get('/api/:collection', async (req, res) => {
   try {
     const { collection } = req.params;
-    let query = db.collection(collection);
+    const userUid = req.user.uid;
+    let query = db.collection('users').doc(userUid).collection(collection);
 
     // Dynamic Sorters
     if (collection === 'tasks') {
@@ -228,7 +226,7 @@ app.get('/api/:collection', async (req, res) => {
       snap = await query.get();
     } catch (queryError) {
       console.warn(`[API] Query failed for ${collection} (possibly missing index/field on orderBy). Falling back to unordered query. Error:`, queryError.message);
-      snap = await db.collection(collection).get();
+      snap = await db.collection('users').doc(userUid).collection(collection).get();
     }
 
     let docs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
@@ -252,7 +250,8 @@ app.get('/api/:collection', async (req, res) => {
 app.get('/api/:collection/:id', async (req, res) => {
   try {
     const { collection, id } = req.params;
-    const doc = await db.collection(collection).doc(id).get();
+    const userUid = req.user.uid;
+    const doc = await db.collection('users').doc(userUid).collection(collection).doc(id).get();
     doc.exists ? res.json(success({ id: doc.id, ...doc.data() })) : res.json(error('Not found'));
   } catch (e) { res.json(error(e.message)); }
 });
@@ -261,6 +260,7 @@ app.get('/api/:collection/:id', async (req, res) => {
 app.post('/api/:collection', async (req, res) => {
   try {
     const { collection } = req.params;
+    const userUid = req.user.uid;
     const data = { ...req.body, createdAt: Date.now(), updatedAt: Date.now() };
 
     if (collection === 'activities') {
@@ -270,7 +270,7 @@ app.post('/api/:collection', async (req, res) => {
       data.read = false;
     }
 
-    const doc = await db.collection(collection).add(data);
+    const doc = await db.collection('users').doc(userUid).collection(collection).add(data);
 
     // Alerts
     if (collection === 'tasks' || collection === 'deals') {
@@ -279,7 +279,7 @@ app.post('/api/:collection', async (req, res) => {
 
     // NEW: Auto-create calendar event when a Task with a dueDate is created
     if (collection === 'tasks' && data.dueDate) {
-      await db.collection('calendar').add({
+      await db.collection('users').doc(userUid).collection('calendar').add({
         title: data.title || 'Task Deadline',
         type: 'TASK',
         status: data.status || 'todo',
@@ -299,7 +299,9 @@ app.post('/api/:collection', async (req, res) => {
 app.put('/api/:collection/:id', async (req, res) => {
   try {
     const { collection, id } = req.params;
-    const existingDoc = await db.collection(collection).doc(id).get();
+    const userUid = req.user.uid;
+    const userRef = db.collection('users').doc(userUid);
+    const existingDoc = await userRef.collection(collection).doc(id).get();
 
     if (!existingDoc.exists) return res.json(error('Not found'));
 
@@ -307,11 +309,11 @@ app.put('/api/:collection/:id', async (req, res) => {
     const isNowCompleted = collection === 'tasks' && existingData.status !== 'completed' && req.body.status === 'completed';
     const isCalendarNowCompleted = collection === 'calendar' && existingData.status !== 'completed' && req.body.status === 'completed';
 
-    await db.collection(collection).doc(id).update({ ...req.body, updatedAt: Date.now() });
+    await userRef.collection(collection).doc(id).update({ ...req.body, updatedAt: Date.now() });
 
     // Sync Calendar Event -> Task
     if (collection === 'calendar' && req.body.timestamp && existingData.taskId) {
-      await db.collection('tasks').doc(existingData.taskId).update({
+      await userRef.collection('tasks').doc(existingData.taskId).update({
         dueDate: req.body.timestamp,
         updatedAt: Date.now()
       });
@@ -319,14 +321,14 @@ app.put('/api/:collection/:id', async (req, res) => {
 
     // Sync Task -> Calendar Event
     if (collection === 'tasks') {
-      const calSnap = await db.collection('calendar').where('taskId', '==', id).get();
+      const calSnap = await userRef.collection('calendar').where('taskId', '==', id).get();
       if (!calSnap.empty) {
         const calDocId = calSnap.docs[0].id;
         let calUpdates = { updatedAt: Date.now() };
         if (req.body.dueDate) calUpdates.timestamp = req.body.dueDate;
         if (req.body.status) calUpdates.status = req.body.status;
         if (req.body.title) calUpdates.title = req.body.title;
-        await db.collection('calendar').doc(calDocId).update(calUpdates);
+        await userRef.collection('calendar').doc(calDocId).update(calUpdates);
       }
     }
 
@@ -334,7 +336,7 @@ app.put('/api/:collection/:id', async (req, res) => {
     if (isCalendarNowCompleted && existingData.type === 'MEETING') {
       const followUpDate = new Date();
       followUpDate.setDate(followUpDate.getDate() + 1); // +24 hours
-      await db.collection('tasks').add({
+      await userRef.collection('tasks').add({
         title: `Follow-up regarding: ${existingData.title || req.body.title || 'Meeting'}`,
         description: 'Automated follow-up task generated post-meeting.',
         status: 'todo',
@@ -365,10 +367,10 @@ app.put('/api/:collection/:id', async (req, res) => {
       };
       delete nextTask.id;
 
-      const newRecurrentDoc = await db.collection('tasks').add(nextTask);
+      const newRecurrentDoc = await userRef.collection('tasks').add(nextTask);
 
       // Add linked calendar event for the new recurring task
-      await db.collection('calendar').add({
+      await userRef.collection('calendar').add({
         title: nextTask.title || 'Task Deadline',
         type: 'TASK',
         status: 'todo',
@@ -382,7 +384,7 @@ app.put('/api/:collection/:id', async (req, res) => {
 
     // Alerts for Deals/Tasks
     if (collection === 'tasks' || collection === 'deals') {
-      sendDiscordAlertIfEnabled(collection === 'tasks' ? 'task' : 'deal', { id, ...existingData, ...req.body });
+      sendDiscordAlertIfEnabled(collection === 'tasks' ? 'task' : 'deal', { id, ...existingData, ...req.body }, userUid);
     }
 
     res.json(success({ id }));
@@ -393,7 +395,8 @@ app.put('/api/:collection/:id', async (req, res) => {
 app.delete('/api/:collection/:id', async (req, res) => {
   try {
     const { collection, id } = req.params;
-    await db.collection(collection).doc(id).delete();
+    const userUid = req.user.uid;
+    await db.collection('users').doc(userUid).collection(collection).doc(id).delete();
     res.json(success({ deleted: true }));
   } catch (e) { res.json(error(e.message)); }
 });
@@ -402,9 +405,11 @@ app.delete('/api/:collection/:id', async (req, res) => {
 app.post('/api/tasks/bulk-delete', async (req, res) => {
   try {
     const { ids } = req.body;
+    const userUid = req.user.uid;
     if (!Array.isArray(ids)) return res.json(error('ids must be an array'));
     const batch = db.batch();
-    ids.forEach(id => { batch.delete(db.collection('tasks').doc(id)); });
+    const tasksRef = db.collection('users').doc(userUid).collection('tasks');
+    ids.forEach(id => { batch.delete(tasksRef.doc(id)); });
     await batch.commit();
     res.json(success({ deletedCount: ids.length }));
   } catch (e) { res.json(error(e.message)); }
@@ -413,9 +418,11 @@ app.post('/api/tasks/bulk-delete', async (req, res) => {
 app.put('/api/tasks/bulk-update', async (req, res) => {
   try {
     const { ids, data } = req.body;
+    const userUid = req.user.uid;
     if (!Array.isArray(ids)) return res.json(error('ids must be an array'));
     const batch = db.batch();
-    ids.forEach(id => { batch.update(db.collection('tasks').doc(id), { ...data, updatedAt: Date.now() }); });
+    const tasksRef = db.collection('users').doc(userUid).collection('tasks');
+    ids.forEach(id => { batch.update(tasksRef.doc(id), { ...data, updatedAt: Date.now() }); });
     await batch.commit();
     res.json(success({ updatedCount: ids.length }));
   } catch (e) { res.json(error(e.message)); }
@@ -426,10 +433,12 @@ app.put('/api/tasks/bulk-update', async (req, res) => {
 app.get('/api/accounts/:id/timeline', async (req, res) => {
   try {
     const { id } = req.params;
+    const userUid = req.user.uid;
+    const userRef = db.collection('users').doc(userUid);
     const [tasksSnap, calendarSnap, activitiesSnap] = await Promise.all([
-      db.collection('tasks').where('accountId', '==', id).get(),
-      db.collection('calendar').where('accountId', '==', id).get(),
-      db.collection('activities').where('accountId', '==', id).get()
+      userRef.collection('tasks').where('accountId', '==', id).get(),
+      userRef.collection('calendar').where('accountId', '==', id).get(),
+      userRef.collection('activities').where('accountId', '==', id).get()
     ]);
 
     const tasks = tasksSnap.docs.map(d => ({ id: d.id, _feedType: 'task', ...d.data() }));
@@ -448,11 +457,13 @@ app.get('/api/accounts/:id/timeline', async (req, res) => {
 
 app.get('/api/stats', async (req, res) => {
   try {
+    const userUid = req.user.uid;
+    const userRef = db.collection('users').doc(userUid);
     const [clients, leads, tasks, quotes] = await Promise.all([
-      db.collection('clients').get(),
-      db.collection('leads').get(),
-      db.collection('tasks').get(),
-      db.collection('quotes').get()
+      userRef.collection('clients').get(),
+      userRef.collection('leads').get(),
+      userRef.collection('tasks').get(),
+      userRef.collection('quotes').get()
     ]);
     res.json(success({
       totalClients: clients.size,
@@ -467,21 +478,23 @@ app.get('/api/stats', async (req, res) => {
 
 app.get('/api/settings/discord', async (req, res) => {
   try {
-    const doc = await db.collection('settings').doc('discord').get();
+    const userUid = req.user.uid;
+    const doc = await db.collection('users').doc(userUid).collection('settings').doc('discord').get();
     res.json(success(doc.exists ? doc.data() : { webhookUrl: '', options: { highPriorityTasks: false, dealStageChanges: false } }));
   } catch (e) { res.json(error(e.message)); }
 });
 
 app.post('/api/settings/discord', async (req, res) => {
   try {
-    await db.collection('settings').doc('discord').set({ ...req.body, updatedAt: Date.now() });
+    const userUid = req.user.uid;
+    await db.collection('users').doc(userUid).collection('settings').doc('discord').set({ ...req.body, updatedAt: Date.now() });
     res.json(success({ id: 'discord' }));
   } catch (e) { res.json(error(e.message)); }
 });
 
-const sendDiscordAlertIfEnabled = async (type, data) => {
+const sendDiscordAlertIfEnabled = async (type, data, userUid) => {
   try {
-    const doc = await db.collection('settings').doc('discord').get();
+    const doc = await db.collection('users').doc(userUid).collection('settings').doc('discord').get();
     if (!doc.exists) return;
     const settings = doc.data();
     if (!settings.webhookUrl) return;
