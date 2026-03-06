@@ -3,6 +3,8 @@ const { getFirestore } = require('firebase-admin/firestore');
 const { getAuth } = require('firebase-admin/auth');
 const express = require('express');
 const cors = require('cors');
+const http = require('http');
+const { Server } = require('socket.io');
 
 const serviceAccount = require('./service-account.json');
 
@@ -10,6 +12,14 @@ initializeApp({ credential: cert(serviceAccount) });
 const db = getFirestore();
 
 const app = express();
+const server = http.createServer(app);
+const io = new Server(server, {
+  cors: {
+    origin: '*',
+    methods: ['GET', 'POST']
+  }
+});
+
 app.use(cors());
 app.use(express.json());
 
@@ -34,6 +44,36 @@ const authenticate = async (req, res, next) => {
 };
 
 app.use(authenticate);
+
+// ==================== SOCKET.IO HANDLER ====================
+io.on('connection', (socket) => {
+  console.log(`[SOCKET] Client connected: ${socket.id}`);
+
+  socket.on('join', (userUid) => {
+    if (userUid) {
+      socket.join(userUid);
+      console.log(`[SOCKET] Client ${socket.id} joined room: ${userUid}`);
+    }
+  });
+
+  socket.on('disconnect', () => {
+    console.log(`[SOCKET] Client disconnected: ${socket.id}`);
+  });
+});
+
+// Helper to emit data_change events to a user's room
+const emitDataChange = (userUid, eventType, collection, entityId, data = {}) => {
+  if (userUid && io) {
+    io.to(userUid).emit('data_change', {
+      type: eventType,
+      collection,
+      entityId,
+      data,
+      timestamp: Date.now()
+    });
+    console.log(`[SOCKET] Emitted ${eventType} for ${collection}/${entityId} to user ${userUid}`);
+  }
+};
 
 const success = (data) => ({ status: 'success', data });
 const error = (msg) => ({ status: 'error', message: msg });
@@ -277,6 +317,9 @@ app.post('/api/:collection', async (req, res) => {
 
     const doc = await db.collection('users').doc(userUid).collection(collection).add(data);
 
+    // Emit socket event for real-time sync
+    emitDataChange(userUid, 'create', collection, doc.id, data);
+
     // Alerts
     if (collection === 'tasks' || collection === 'deals') {
       sendDiscordAlertIfEnabled(collection === 'tasks' ? 'task' : 'deal', { id: doc.id, ...data });
@@ -315,6 +358,9 @@ app.put('/api/:collection/:id', async (req, res) => {
     const isCalendarNowCompleted = collection === 'calendar' && existingData.status !== 'completed' && req.body.status === 'completed';
 
     await userRef.collection(collection).doc(id).update({ ...req.body, updatedAt: Date.now() });
+
+    // Emit socket event for real-time sync
+    emitDataChange(userUid, 'update', collection, id, req.body);
 
     // Sync Calendar Event -> Task
     if (collection === 'calendar' && req.body.timestamp && existingData.taskId) {
@@ -402,6 +448,10 @@ app.delete('/api/:collection/:id', async (req, res) => {
     const { collection, id } = req.params;
     const userUid = req.user.uid;
     await db.collection('users').doc(userUid).collection(collection).doc(id).delete();
+
+    // Emit socket event for real-time sync
+    emitDataChange(userUid, 'delete', collection, id);
+
     res.json(success({ deleted: true }));
   } catch (e) { res.json(error(e.message)); }
 });
@@ -416,6 +466,9 @@ app.post('/api/tasks/bulk-delete', async (req, res) => {
     const tasksRef = db.collection('users').doc(userUid).collection('tasks');
     ids.forEach(id => { batch.delete(tasksRef.doc(id)); });
     await batch.commit();
+
+    emitDataChange(userUid, 'bulk_delete', 'tasks', null, { ids });
+
     res.json(success({ deletedCount: ids.length }));
   } catch (e) { res.json(error(e.message)); }
 });
@@ -429,6 +482,9 @@ app.put('/api/tasks/bulk-update', async (req, res) => {
     const tasksRef = db.collection('users').doc(userUid).collection('tasks');
     ids.forEach(id => { batch.update(tasksRef.doc(id), { ...data, updatedAt: Date.now() }); });
     await batch.commit();
+
+    emitDataChange(userUid, 'bulk_update', 'tasks', null, { ids, data });
+
     res.json(success({ updatedCount: ids.length }));
   } catch (e) { res.json(error(e.message)); }
 });
@@ -551,4 +607,4 @@ app.post('/api/discord/test', async (req, res) => {
 });
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`🚀 ChromaBase API running on port ${PORT}`));
+server.listen(PORT, () => console.log(`🚀 ChromaBase API running on port ${PORT}`));
