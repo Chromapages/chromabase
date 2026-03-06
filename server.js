@@ -25,8 +25,10 @@ const authenticate = async (req, res, next) => {
   try {
     const decoded = await getAuth().verifyIdToken(token);
     req.user = decoded;
+    console.log(`[AUTH] Authenticated user: ${decoded.email} (${decoded.uid})`);
     next();
   } catch (err) {
+    console.error(`[AUTH] Token verification failed:`, err.message);
     return res.status(401).json({ status: 'error', message: 'Unauthorized: Invalid ID token.' });
   }
 };
@@ -201,6 +203,7 @@ app.get('/api/:collection', async (req, res) => {
   try {
     const { collection } = req.params;
     const userUid = req.user.uid;
+    console.log(`[API] GET /api/${collection} for user: ${userUid}`);
     let query = db.collection('users').doc(userUid).collection(collection);
 
     // Dynamic Sorters
@@ -225,9 +228,11 @@ app.get('/api/:collection', async (req, res) => {
     try {
       snap = await query.get();
     } catch (queryError) {
-      console.warn(`[API] Query failed for ${collection} (possibly missing index/field on orderBy). Falling back to unordered query. Error:`, queryError.message);
+      console.warn(`[API] Query failed for ${collection}. Error:`, queryError.message);
       snap = await db.collection('users').doc(userUid).collection(collection).get();
     }
+
+    console.log(`[API] Found ${snap.size} documents in ${collection} for user ${userUid}`);
 
     let docs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
 
