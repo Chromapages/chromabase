@@ -24,7 +24,9 @@ app.use(cors());
 app.use(express.json());
 
 const authenticate = async (req, res, next) => {
-  if (req.path === '/' || req.path === '/api/health') return next();
+  // Bypass auth for these endpoints (ChromaBrain sync, health checks)
+  const publicPaths = ['/', '/api/health', '/api/sync'];
+  if (publicPaths.includes(req.path)) return next();
 
   const authHeader = req.headers.authorization;
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
@@ -235,6 +237,41 @@ app.get('/', (req, res) => {
 
 // Health
 app.get('/api/health', (req, res) => res.json({ status: 'ok', service: 'ChromaBase API', firestore: !!db }));
+
+// ==================== SYNC ENDPOINT (No Auth - ChromaBrain Only) ====================
+app.get('/api/sync', async (req, res) => {
+  try {
+    // Allow passing user ID via query param, or default to 'chromabrain'
+    const userUid = req.query.userId || 'chromabrain';
+    const userRef = db.collection('users').doc(userUid);
+    
+    // Get all main collections
+    const [clientsSnap, leadsSnap, tasksSnap, quotesSnap, appointmentsSnap, activitiesSnap] = await Promise.all([
+      userRef.collection('clients').get(),
+      userRef.collection('leads').get(),
+      userRef.collection('tasks').get(),
+      userRef.collection('quotes').get(),
+      userRef.collection('appointments').get(),
+      userRef.collection('activities').orderBy('timestamp', 'desc').limit(100).get()
+    ]);
+
+    res.json({
+      status: 'success',
+      data: {
+        clients: clientsSnap.docs.map(d => ({ id: d.id, ...d.data() })),
+        leads: leadsSnap.docs.map(d => ({ id: d.id, ...d.data() })),
+        tasks: tasksSnap.docs.map(d => ({ id: d.id, ...d.data() })),
+        quotes: quotesSnap.docs.map(d => ({ id: d.id, ...d.data() })),
+        appointments: appointmentsSnap.docs.map(d => ({ id: d.id, ...d.data() })),
+        activities: activitiesSnap.docs.map(d => ({ id: d.id, ...d.data() })),
+        syncedAt: Date.now()
+      }
+    });
+  } catch (e) {
+    console.error('[SYNC] Error:', e.message);
+    res.json({ status: 'error', message: e.message });
+  }
+});
 
 // ==================== DYNAMIC COLLECTION HANDLERS ====================
 
