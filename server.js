@@ -636,7 +636,34 @@ app.get('/api/stats', async (req, res) => {
       totalRevenue: quotes.docs.filter(d => d.data().status === 'accepted').reduce((sum, d) => sum + (d.data().total || 0), 0),
       pendingQuotes: quotes.docs.filter(d => d.data().status === 'sent').length
     }));
-  } catch (e) { res.json(error(e.message)); }
+  } catch (e) { res.status(500).json(error(e.message)); }
+});
+
+// Search across collections
+app.get('/api/search', async (req, res) => {
+  try {
+    const userUid = req.user.uid;
+    const query = (req.query.q || '').toString().toLowerCase();
+    if (!query || query.length < 2) return res.json(success({ clients: [], leads: [], contacts: [] }));
+    
+    const userRef = db.collection('users').doc(userUid);
+    const [clients, leads, contacts] = await Promise.all([
+      userRef.collection('clients').get(),
+      userRef.collection('leads').get(),
+      userRef.collection('contacts').get()
+    ]);
+    
+    const searchIn = (docs, fields) => docs.filter(d => {
+      const data = d.data();
+      return fields.some(f => data[f] && String(data[f]).toLowerCase().includes(query));
+    });
+    
+    res.json(success({
+      clients: searchIn(clients.docs, ['name', 'company', 'email']).map(d => ({ id: d.id, ...d.data() })),
+      leads: searchIn(leads.docs, ['name', 'company', 'email']).map(d => ({ id: d.id, ...d.data() })),
+      contacts: searchIn(contacts.docs, ['name', 'email', 'phone']).map(d => ({ id: d.id, ...d.data() }))
+    }));
+  } catch (e) { res.status(500).json(error(e.message)); }
 });
 
 app.get('/api/settings/discord', async (req, res) => {
