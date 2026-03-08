@@ -24,8 +24,8 @@ app.use(cors());
 app.use(express.json());
 
 const authenticate = async (req, res, next) => {
-  // Bypass auth for these endpoints (ChromaBrain sync, health checks)
-  const publicPaths = ['/', '/api/health', '/api/sync'];
+  // Bypass auth for these endpoints (ChromaBrain sync, health checks, AHM pipelines)
+  const publicPaths = ['/', '/api/health', '/api/sync', '/api/pipelines'];
   if (publicPaths.includes(req.path)) return next();
 
   const authHeader = req.headers.authorization;
@@ -238,13 +238,78 @@ app.get('/', (req, res) => {
 // Health
 app.get('/api/health', (req, res) => res.json({ status: 'ok', service: 'ChromaBase API', firestore: !!db }));
 
+// ==================== AHM PIPELINE SYNC (No Auth - AHM Only) ====================
+// Receive pipeline status from Agent Handoff Manager
+app.post('/api/pipelines', async (req, res) => {
+  try {
+    const { id, task, agents, status, createdAt, completedAt, outputPath, handoffs } = req.body;
+
+    if (!id) {
+      return res.status(400).json({ error: 'Pipeline ID is required' });
+    }
+
+    // Build pipeline data, excluding undefined values
+    const pipelineData = {
+      id,
+      task: task || '',
+      agents: agents || [],
+      status,
+      createdAt: createdAt ? new Date(createdAt) : new Date(),
+      completedAt: completedAt ? new Date(completedAt) : null,
+      updatedAt: new Date()
+    };
+
+    if (outputPath) pipelineData.outputPath = outputPath;
+    if (handoffs) pipelineData.handoffs = handoffs;
+
+    // Store pipeline in firestore
+    const pipelineRef = db.collection('pipelines').doc(id);
+    await pipelineRef.set(pipelineData, { merge: true });
+
+    // Also log as activity
+    await db.collection('activities').add({
+      type: 'pipeline',
+      pipelineId: id,
+      action: status === 'completed' ? 'completed' : 'started',
+      task: task ? task.substring(0, 50) : '',
+      timestamp: new Date()
+    });
+
+    console.log(`[PIPELINE] Synced: ${id} - ${status}`);
+
+    res.json({ success: true, id, status });
+  } catch (error) {
+    console.error('[PIPELINE] Sync error:', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// List pipelines
+app.get('/api/pipelines', async (req, res) => {
+  try {
+    const snapshot = await db.collection('pipelines')
+      .orderBy('updatedAt', 'desc')
+      .limit(50)
+      .get();
+
+    const pipelines = snapshot.docs.map(doc => ({
+      id: doc.id,
+      ...doc.data()
+    }));
+
+    res.json({ pipelines });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // ==================== SYNC ENDPOINT (No Auth - ChromaBrain Only) ====================
 app.get('/api/sync', async (req, res) => {
   try {
     // Allow passing user ID via query param, or default to 'chromabrain'
     const userUid = req.query.userId || 'chromabrain';
     const userRef = db.collection('users').doc(userUid);
-    
+
     // Get all main collections
     const [clientsSnap, leadsSnap, tasksSnap, quotesSnap, appointmentsSnap, activitiesSnap] = await Promise.all([
       userRef.collection('clients').get(),
