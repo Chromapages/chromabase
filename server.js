@@ -235,8 +235,26 @@ app.get('/', (req, res) => {
   `);
 });
 
-// Health
-app.get('/api/health', (req, res) => res.json({ status: 'ok', service: 'ChromaBase API', firestore: !!db }));
+// Health - enhanced with Firestore ping
+app.get('/api/health', async (req, res) => {
+  try {
+    // Actually ping Firestore to verify connectivity
+    await db.collection('_health').doc('check').get({ source: 'server' });
+    res.json({ 
+      status: 'ok', 
+      service: 'ChromaBase API', 
+      firestore: 'connected',
+      timestamp: new Date().toISOString()
+    });
+  } catch (err) {
+    res.status(503).json({ 
+      status: 'error', 
+      service: 'ChromaBase API', 
+      firestore: 'disconnected',
+      error: err.message 
+    });
+  }
+});
 
 // ==================== AHM PIPELINE SYNC (No Auth - AHM Only) ====================
 // Receive pipeline status from Agent Handoff Manager
