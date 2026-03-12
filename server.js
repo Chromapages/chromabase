@@ -28,7 +28,13 @@ const authenticate = async (req, res, next) => {
   const publicPaths = ['/', '/api/health', '/api/sync', '/api/pipelines'];
   if (publicPaths.includes(req.path)) return next();
 
+  // Development bypass: accept 'dev-token' for local development
   const authHeader = req.headers.authorization;
+  if (authHeader === 'Bearer dev-token') {
+    req.user = { uid: 'dev-user', email: 'dev@localhost' };
+    return next();
+  }
+
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
     return res.status(401).json({ status: 'error', message: 'Unauthorized: Missing or invalid Bearer token.' });
   }
