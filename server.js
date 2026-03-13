@@ -3,6 +3,7 @@ const { getFirestore } = require('firebase-admin/firestore');
 const { getAuth } = require('firebase-admin/auth');
 const express = require('express');
 const cors = require('cors');
+const rateLimit = require('express-rate-limit');
 const http = require('http');
 const { Server } = require('socket.io');
 
@@ -22,6 +23,16 @@ const io = new Server(server, {
 
 app.use(cors());
 app.use(express.json());
+
+// Rate limiting - 100 requests per minute per IP
+const limiter = rateLimit({
+  windowMs: 60 * 1000, // 1 minute
+  max: 100, // 100 requests per minute
+  message: { status: 'error', message: 'Too many requests, please try again later.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+app.use('/api', limiter);
 
 const authenticate = async (req, res, next) => {
   // Bypass auth for these endpoints (ChromaBrain sync, health checks, AHM pipelines)
