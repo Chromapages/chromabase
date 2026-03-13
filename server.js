@@ -770,5 +770,100 @@ app.post('/api/discord/test', async (req, res) => {
   } catch (e) { res.json(error(e.message)); }
 });
 
+// ==================== LEAD NURTURING AUTOMATION ====================
+// POST /api/leads/nurture - Create lead + auto-create follow-up tasks
+app.post('/api/leads/nurture', async (req, res) => {
+  try {
+    const userUid = req.user.uid;
+    const { name, email, phone, source, notes, ownerId } = req.body;
+    
+    if (!name && !email) {
+      return res.status(400).json(error('Name or email required'));
+    }
+    
+    const leadData = {
+      name: name || '',
+      email: email || '',
+      phone: phone || '',
+      source: source || 'website',
+      notes: notes || '',
+      status: 'new',
+      ownerId: ownerId || userUid,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    };
+    
+    // Create lead
+    const leadRef = await db.collection('users').doc(userUid).collection('leads').add(leadData);
+    const leadId = leadRef.id;
+    
+    // Auto-create nurturing tasks (1-day, 3-day, 7-day follow-ups)
+    const nurturingTasks = [
+      {
+        title: `Follow up with ${name || 'lead'}`,
+        description: `Initial follow-up. Source: ${source || 'website'}. Notes: ${notes || 'N/A'}`,
+        status: 'pending',
+        priority: 'high',
+        dueDate: new Date(Date.now() + 1 * 24 * 60 * 60 * 1000).toISOString(), // Tomorrow
+        leadId,
+        leadEmail: email,
+        category: 'lead-nurture',
+        createdAt: new Date().toISOString()
+      },
+      {
+        title: `Nurture: 3-day check-in with ${name || 'lead'}`,
+        description: '3-day follow-up. Send value, answer questions, assess fit.',
+        status: 'pending',
+        priority: 'medium',
+        dueDate: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString(), // 3 days
+        leadId,
+        leadEmail: email,
+        category: 'lead-nurture',
+        createdAt: new Date().toISOString()
+      },
+      {
+        title: `Nurture: 7-day decision check with ${name || 'lead'}`,
+        description: '7-day follow-up. Discuss timeline, address objections, close.',
+        status: 'pending',
+        priority: 'medium',
+        dueDate: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(), // 7 days
+        leadId,
+        leadEmail: email,
+        category: 'lead-nurture',
+        createdAt: new Date().toISOString()
+      }
+    ];
+    
+    // Batch create tasks
+    const batch = db.batch();
+    nurturingTasks.forEach(task => {
+      const taskRef = db.collection('users').doc(userUid).collection('tasks').doc();
+      batch.set(taskRef, task);
+    });
+    await batch.commit();
+    
+    // Log activity
+    await db.collection('users').doc(userUid).collection('activities').add({
+      type: 'lead_created',
+      description: `New lead "${name || email}" created with auto-nurture tasks`,
+      leadId,
+      leadName: name,
+      leadEmail: email,
+      timestamp: new Date().toISOString()
+    });
+    
+    console.log(`[NURTURE] Created lead ${leadId} with 3 follow-up tasks for user ${userUid}`);
+    
+    res.json(success({
+      leadId,
+      lead: { id: leadId, ...leadData },
+      tasksCreated: 3
+    }));
+  } catch (e) {
+    console.error('[NURTURE] Error:', e.message);
+    res.json(error(e.message));
+  }
+});
+
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => console.log(`🚀 ChromaBase API running on port ${PORT}`));
